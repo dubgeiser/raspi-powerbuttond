@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+
+"""Raspberry Pi daemon that'll watch for the press of a power button.
+The button is assumed to be wired to the GPIO pin, as defined by the `--gpio`
+option.
+
+When the button is pressed, the Raspberry Pi will do one of three things:
+
+    - Halt (power off), if the button is pressed long enough.
+      The time can be set via the `--htime` option.
+
+    - Reboot, if the button is pressed long enough, but released before halt time.
+      The time can be set via the `--rtime` option.
+
+    - Nothing, if the button was not pressed long enough.
+      This is to prevent the Pi from accidentally being reset/turned off.
+"""
+
+from argparse import ArgumentParser
+from argparse import RawDescriptionHelpFormatter, ArgumentDefaultsHelpFormatter
+import os
+from signal import pause
+import sys
+import time
+
+from gpiozero import Button
+
+
+class ButtonController:
+    """Controller for the power button.
+    Set up the button, watch for presses, time them and act accordingly.
+    """
+    def __init__(self, button: Button, rtime: int, htime: int) -> None:
+        self.button = button
+        self.rtime = rtime
+        self.htime = htime
+        self.pressed_at = 0
+
+    def run(self) -> None:
+        self.button.when_pressed = self.button_pressed
+        self.button.when_released = self.button_released
+        pause()
+
+    def button_pressed(self):
+        """Handle a button press."""
+        self.pressed_at = time.time()
+
+    def button_released(self):
+        """Handle a button release."""
+        elapsed = time.time() - self.pressed_at
+        if elapsed < self.rtime:
+            return
+        action = "r" if self.rtime <= elapsed < self.htime else "h"
+        os.system(f"sudo shutdown now -{action}")
+
+
+class Formatter(RawDescriptionHelpFormatter, ArgumentDefaultsHelpFormatter):
+    """argparse Formatter combining raw description and defaults help.
+    Formats the description as it was written in __doc__ and at the same time
+    mentions the default values in the help texts of the arguments.
+    """
+
+
+class Cli:
+    """Command line interface for the power button daemon.
+    Set up command line argument parser and if the arguments are valid, start
+    the button controller.
+    Exit with a non-zero status code if something went wrong.
+    """
+
+    def __init__(self) -> None:
+        self.parser = ArgumentParser(description=__doc__, formatter_class=Formatter)
+        self.parser.add_argument("--gpio",
+                            help="GPIO pin of the power button",
+                            type=int, default=3)
+        self.parser.add_argument("--rtime",
+                            help="Time (seconds) the button must be pressed to trigger a reboot",
+                            type=float, default=0.5)
+        self.parser.add_argument("--htime",
+                            help="Time (seconds) the button must be pressed for a halt",
+                            type=float, default=3)
+
+    def validate_args(self, gpiopin: int, rtime : float, htime : float) -> list:
+        errors = []
+        if gpiopin <= 0:
+            errors.append(f"GPIO ({gpiopin}) should be a positive integer.")
+        if rtime >= htime:
+            errors.append(f"RTIME ({rtime}) should be smaller than HTIME ({htime}).")
+        return errors
+
+    def print_errors(self, errors: list) -> None:
+        for e in errors:
+            print(e)
+
+    def parse_args_or_exit(self) -> tuple:
+        args = self.parser.parse_args()
+        errors = self.validate_args(args.gpio, args.rtime, args.htime)
+        if len(errors) > 0:
+            self.print_errors(errors)
+            sys.exit(1)
+        return args.gpio, args.rtime, args.htime
+
+    def run(self) -> None:
+        gpio, rtime, htime = self.parse_args_or_exit()
+        controller = ButtonController(Button(gpio), rtime, htime)
+        controller.run()
+
+
+if __name__ == "__main__":
+    Cli().run()
