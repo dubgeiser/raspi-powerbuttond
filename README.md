@@ -9,9 +9,7 @@ See `raspi-powerbuttond --help` for the options and their defaults.
 
 ## Development
 
-There's `gpiozero.py` stub to shut up LSP server in Neovim.  Should be replaced with an emulator or something, but for now, it's Good Enough™
-
-This file should _not_ be copied over to the Raspberry Pi you'll be running on.
+Create a virtual environment, activate it and install dependencies with `pip install -r requirements.txt`
 
 
 ## Install
